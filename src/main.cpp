@@ -1,13 +1,26 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <time.h>
 #include <Adafruit_AS7341.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
 
 Adafruit_AS7341 as7341;
+WiFiClient wifiClient;
+PubSubClient natsClient(wifiClient);
 
-static const char* ssid = ENV_WIFI_NAME;
-static const char* password = ENV_WIFI_PASS;
-static const char* hostname = "esp32-wifi-spectrometer-01";
+static const char* hostname = "esp32-wifi-growtent-spectrometer-01";
+static const char* wifi_ssid = ENV_WIFI_SSID;
+static const char* wifi_password = ENV_WIFI_PASSWORD;
+static const char* nats_username = ENV_NATS_MQTT_USERNAME;
+static const char* nats_password = ENV_NATS_MQTT_PASSWORD;
+static const char* nats_host = "nats.local";
+static const int nats_port = 1883;
+static const char* nats_subject = "ingress/growtent/spectrometer/readings";
+static const char* ntp_server = "pool.ntp.org";
+static const long gmt_offset_sec = 0;
+static const int daylight_offset_sec = 0;
 
 struct SensitivityFactors {
   float channel_415nm = 100.0;
@@ -40,19 +53,29 @@ void setupWifi() {
   WiFi.setHostname(hostname);
   WiFi.mode(WIFI_STA);
   WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
-  WiFi.begin(ssid, password);
+  WiFi.begin(wifi_ssid, wifi_password);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     Serial.println("Connecting to WiFi...");
   }
 
-  Serial.println("ESP32 IP Address: ");
+  Serial.print("\nESP32 IP Address: ");
   Serial.println(WiFi.localIP());
-  Serial.println("ESP32 HostName: ");
+  Serial.print("ESP32 HostName: ");
   Serial.println(WiFi.getHostname());
-  Serial.println("RSSI: ");
+  Serial.print("RRSI: ");
   Serial.println(WiFi.RSSI());
+}
+
+String getISOTimestamp() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return "1970-01-01T00:00:00Z";
+  }
+  char buffer[25];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+  return String(buffer);
 }
 
 void setupSensor() {
@@ -68,6 +91,48 @@ void setupSensor() {
   as7341.setGain(AS7341_GAIN_256X);
   
   Serial.println("AS7341 sensor initialized successfully!");
+}
+
+void setupNATS() {
+  natsClient.setServer(nats_host, nats_port);
+  natsClient.setBufferSize(512);
+  natsClient.setKeepAlive(60);
+  
+  while (!natsClient.connected()) {
+    Serial.println("Attempting NATS connection...");
+  
+    if (natsClient.connect(hostname, nats_username, nats_password)) {
+      Serial.println("Connected to NATS server");
+      Serial.printf("NATS Host: %s:%d\n", nats_host, nats_port);
+    } else {
+      Serial.print("Failed, rc=");
+      Serial.print(natsClient.state());
+      Serial.println(" retrying in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+String spectralDataToJson(const SpectralData& data) {
+  JsonDocument doc;
+  
+  doc["device"] = hostname;
+  doc["timestamp"] = getISOTimestamp();
+  doc["channels"]["415nm"] = data.channel_415nm;
+  doc["channels"]["445nm"] = data.channel_445nm;
+  doc["channels"]["480nm"] = data.channel_480nm;
+  doc["channels"]["515nm"] = data.channel_515nm;
+  doc["channels"]["555nm"] = data.channel_555nm;
+  doc["channels"]["590nm"] = data.channel_590nm;
+  doc["channels"]["630nm"] = data.channel_630nm;
+  doc["channels"]["680nm"] = data.channel_680nm;
+  doc["channels"]["clear"] = data.channel_clear;
+  doc["channels"]["nir"] = data.channel_nir;
+  doc["ppfd"] = data.ppfd;
+  
+  String jsonString;
+  serializeJson(doc, jsonString);
+  return jsonString;
 }
 
 SpectralData getSpectralData() {
@@ -111,7 +176,12 @@ void setup(){
   Serial.println("ESP32 WiFi Spectrometer with AS7341");
   
   setupWifi();
+  
+  configTime(gmt_offset_sec, daylight_offset_sec, ntp_server);
+  Serial.println("Synchronizing time with NTP server...");
+  
   setupSensor();
+  setupNATS();
   
   Serial.println("Setup complete!");
 }
@@ -120,8 +190,22 @@ void loop(){
   static unsigned long lastReading = 0;
   unsigned long currentTime = millis();
   
+  if (!natsClient.connected()) {
+    setupNATS();
+  }
+  natsClient.loop();
+  
   if (currentTime - lastReading >= 5000) {
     SpectralData data = getSpectralData();
+    
+    String jsonData = spectralDataToJson(data);
+    bool published = natsClient.publish(nats_subject, jsonData.c_str());
+    
+    if (published) {
+      Serial.println("Published data to NATS");
+    } else {
+      Serial.println("Failed publishing to NATS");
+    }
     
     Serial.println("=== Spectral Reading ===");
     Serial.printf("415nm (F1): %d\n", data.channel_415nm);
