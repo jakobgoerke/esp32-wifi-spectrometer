@@ -5,12 +5,15 @@
 #include <Adafruit_AS7341.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <ArduinoOTA.h>
+#include "ota.h"
 
 Adafruit_AS7341 as7341;
 WiFiClient wifiClient;
 PubSubClient natsClient(wifiClient);
 
-static const char* hostname = "esp32-wifi-growtent-spectrometer-01";
+static const char* hostname = ENV_HOSTNAME;
+const char* ota_password = ENV_OTA_PASSWORD;
 static const char* wifi_ssid = ENV_WIFI_SSID;
 static const char* wifi_password = ENV_WIFI_PASSWORD;
 static const char* nats_username = ENV_NATS_MQTT_USERNAME;
@@ -180,6 +183,7 @@ void setup(){
   configTime(gmt_offset_sec, daylight_offset_sec, ntp_server);
   Serial.println("Synchronizing time with NTP server...");
   
+  setupOTA(hostname);
   setupSensor();
   setupNATS();
   
@@ -189,6 +193,8 @@ void setup(){
 void loop(){
   static unsigned long lastReading = 0;
   unsigned long currentTime = millis();
+  
+  ArduinoOTA.handle();
   
   if (!natsClient.connected()) {
     setupNATS();
