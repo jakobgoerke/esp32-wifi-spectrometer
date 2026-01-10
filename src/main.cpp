@@ -49,7 +49,7 @@ struct SpectralData {
   uint16_t channel_680nm;
   uint16_t channel_clear;
   uint16_t channel_nir;
-  float ppfd;
+  uint16_t ppfd;
 };
 
 void setupWifi() {
@@ -168,7 +168,7 @@ SpectralData getSpectralData() {
   ppfd += data.channel_630nm / sensitivity.channel_630nm;
   ppfd += data.channel_680nm / sensitivity.channel_680nm;
   
-  data.ppfd = ppfd;
+  data.ppfd = (uint16_t)ceil(ppfd);
   return data;
 }
 
@@ -224,7 +224,7 @@ void loop(){
     Serial.printf("680nm (F8): %d\n", data.channel_680nm);
     Serial.printf("Clear: %d\n", data.channel_clear);
     Serial.printf("NIR: %d\n", data.channel_nir);
-    Serial.printf("PPFD: %.2f µmol/m²/s\n", data.ppfd);
+    Serial.printf("PPFD: %d µmol/m²/s\n", data.ppfd);
     Serial.println("========================");
     
     lastReading = currentTime;
