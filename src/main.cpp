@@ -25,18 +25,7 @@ static const char* ntp_server = "pool.ntp.org";
 static const long gmt_offset_sec = 0;
 static const int daylight_offset_sec = 0;
 
-struct SensitivityFactors {
-  float channel_415nm = 100.0;
-  float channel_445nm = 120.0;
-  float channel_480nm = 150.0;
-  float channel_515nm = 180.0;
-  float channel_555nm = 200.0;
-  float channel_590nm = 190.0;
-  float channel_630nm = 170.0;
-  float channel_680nm = 140.0;
-  float channel_clear = 1000.0;
-  float channel_nir = 1000.0;
-} sensitivity;
+static const float ppfd_cal_factor = 89.4;
 
 struct SpectralData {
   uint16_t channel_415nm;
@@ -158,17 +147,7 @@ SpectralData getSpectralData() {
   data.channel_clear = readings[8];
   data.channel_nir = readings[9];
   
-  float ppfd = 0.0;
-  ppfd += data.channel_415nm / sensitivity.channel_415nm;
-  ppfd += data.channel_445nm / sensitivity.channel_445nm;
-  ppfd += data.channel_480nm / sensitivity.channel_480nm;
-  ppfd += data.channel_515nm / sensitivity.channel_515nm;
-  ppfd += data.channel_555nm / sensitivity.channel_555nm;
-  ppfd += data.channel_590nm / sensitivity.channel_590nm;
-  ppfd += data.channel_630nm / sensitivity.channel_630nm;
-  ppfd += data.channel_680nm / sensitivity.channel_680nm;
-  
-  data.ppfd = (uint16_t)ceil(ppfd);
+  data.ppfd = (uint16_t)ceil(data.channel_clear / ppfd_cal_factor);
   return data;
 }
 
@@ -193,15 +172,15 @@ void setup(){
 void loop(){
   static unsigned long lastReading = 0;
   unsigned long currentTime = millis();
-  
+
   ArduinoOTA.handle();
-  
+
   if (!natsClient.connected()) {
     setupNATS();
   }
   natsClient.loop();
-  
-  if (currentTime - lastReading >= 5000) {
+
+  if (lastReading == 0 || currentTime - lastReading >= 60000) {
     SpectralData data = getSpectralData();
     
     String jsonData = spectralDataToJson(data);
