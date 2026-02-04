@@ -25,7 +25,7 @@ static const char* ntp_server = "pool.ntp.org";
 static const long gmt_offset_sec = 0;
 static const int daylight_offset_sec = 0;
 
-static const float ppfd_cal_factor = 89.4;
+static const float ppfd_cal_factor = 23.69;
 
 struct SpectralData {
   uint16_t channel_415nm;
@@ -80,7 +80,7 @@ void setupSensor() {
   
   as7341.setATIME(100);
   as7341.setASTEP(999);
-  as7341.setGain(AS7341_GAIN_256X);
+  as7341.setGain(AS7341_GAIN_16X);
   
   Serial.println("AS7341 sensor initialized successfully!");
 }
