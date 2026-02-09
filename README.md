@@ -9,4 +9,4 @@ Mount: https://www.amazon.de/ULANZI-Ausziehbares-Lichtstativ-verstellbares-Schne
 
 Added a second mount to just hang the spectrometer from the ceiling with the usb at the bottom.
 
-![snapshot](_readme/snapshot.JPG)
+<img src="_readme/snapshot.JPG" width="400">
