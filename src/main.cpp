@@ -60,6 +60,27 @@ void setupWifi() {
   Serial.println(WiFi.RSSI());
 }
 
+bool ensureWifi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return true;
+  }
+  Serial.println("WiFi disconnected, reconnecting...");
+  WiFi.disconnect();
+  WiFi.begin(wifi_ssid, wifi_password);
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
+    delay(500);
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi reconnection failed, retrying next loop");
+    return false;
+  }
+  Serial.println("WiFi reconnected");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+  return true;
+}
+
 String getISOTimestamp() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
@@ -174,6 +195,10 @@ void loop(){
   unsigned long currentTime = millis();
 
   ArduinoOTA.handle();
+
+  if (!ensureWifi()) {
+    return;
+  }
 
   if (!natsClient.connected()) {
     setupNATS();
