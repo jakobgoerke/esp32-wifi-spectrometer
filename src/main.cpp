@@ -1,5 +1,4 @@
 #include <SPI.h>
-#include <WiFi.h>
 #include <Wire.h>
 #include <time.h>
 #include <Adafruit_AS7341.h>
@@ -7,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include "ota.h"
+#include "wifi.h"
 
 Adafruit_AS7341 as7341;
 WiFiClient wifiClient;
@@ -41,45 +41,6 @@ struct SpectralData {
   uint16_t ppfd;
 };
 
-void setupWifi() {
-  WiFi.setHostname(hostname);
-  WiFi.mode(WIFI_STA);
-  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
-  WiFi.begin(wifi_ssid, wifi_password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
-  }
-
-  Serial.print("\nESP32 IP Address: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("ESP32 HostName: ");
-  Serial.println(WiFi.getHostname());
-  Serial.print("RRSI: ");
-  Serial.println(WiFi.RSSI());
-}
-
-bool ensureWifi() {
-  if (WiFi.status() == WL_CONNECTED) {
-    return true;
-  }
-  Serial.println("WiFi disconnected, reconnecting...");
-  WiFi.disconnect();
-  WiFi.begin(wifi_ssid, wifi_password);
-  unsigned long startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
-    delay(500);
-  }
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi reconnection failed, retrying next loop");
-    return false;
-  }
-  Serial.println("WiFi reconnected");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
-  return true;
-}
 
 String getISOTimestamp() {
   struct tm timeinfo;
@@ -178,7 +139,7 @@ void setup(){
   
   Serial.println("ESP32 WiFi Spectrometer with AS7341");
   
-  setupWifi();
+  setupWifi(hostname, wifi_ssid, wifi_password);
   
   configTime(gmt_offset_sec, daylight_offset_sec, ntp_server);
   Serial.println("Synchronizing time with NTP server...");
@@ -190,13 +151,15 @@ void setup(){
   Serial.println("Setup complete!");
 }
 
+static const int ppfd_publish_threshold = 10;
+
 void loop(){
-  static unsigned long lastReading = 0;
-  unsigned long currentTime = millis();
+  static uint16_t lastPublishedPpfd = UINT16_MAX;
 
   ArduinoOTA.handle();
 
   if (!ensureWifi()) {
+    delay(1000);
     return;
   }
 
@@ -205,18 +168,19 @@ void loop(){
   }
   natsClient.loop();
 
-  if (lastReading == 0 || currentTime - lastReading >= 60000) {
-    SpectralData data = getSpectralData();
-    
+  SpectralData data = getSpectralData();
+
+  int ppfdDelta = (int)data.ppfd - (int)lastPublishedPpfd;
+  if (abs(ppfdDelta) >= ppfd_publish_threshold) {
     String jsonData = spectralDataToJson(data);
     bool published = natsClient.publish(nats_subject, jsonData.c_str());
-    
+
     if (published) {
       Serial.println("Published data to NATS");
     } else {
       Serial.println("Failed publishing to NATS");
     }
-    
+
     Serial.println("=== Spectral Reading ===");
     Serial.printf("415nm (F1): %d\n", data.channel_415nm);
     Serial.printf("445nm (F2): %d\n", data.channel_445nm);
@@ -230,9 +194,11 @@ void loop(){
     Serial.printf("NIR: %d\n", data.channel_nir);
     Serial.printf("PPFD: %d µmol/m²/s\n", data.ppfd);
     Serial.println("========================");
-    
-    lastReading = currentTime;
+
+    lastPublishedPpfd = data.ppfd;
+  } else {
+    Serial.printf("PPFD delta %d, skipping publish\n", ppfdDelta);
   }
-  
-  delay(100);
+
+  delay(1000);
 }
